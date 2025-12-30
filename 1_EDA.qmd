@@ -1,0 +1,172 @@
+---
+title: "Tidymodels Demo"
+author: "Jessica Aquino, Pedro Cataño"
+format: html
+editor: visual
+---
+
+# 1. Presentación del dataset
+
+Este documento se centra en el análisis exploratorio del conjunto de datos utilizado para la predicción de precios de viviendas.
+
+El objetivo de este EDA es comprender la distribución de la variable objetivo y contextualizar las
+
+Fuente del dataset:\
+https://www.kaggle.com/datasets/aravinii/house-price-prediction-treated-dataset
+
+## 1. Instalación de paquetes
+
+```{r}
+library(tidyverse)
+library(janitor)
+library(skimr)
+```
+
+
+## 2. Load data
+
+```{r}
+df_train <- read_csv("data/df_train.csv")
+df_test  <- read_csv("data/df_test.csv")
+```
+
+## 3. Vistazo general del dataset
+
+Se inspecciona que el dataset fue previamente procesado, ya que no presenta datos faltantes en las variables numéricas, binarias o la fecha.
+
+```{r}
+skim(bind_rows(
+  df_train %>% mutate(split = "Train"),
+  df_test  %>% mutate(split = "Test")
+))
+```
+
+## 4. Variable objetivo: distribución del precio
+
+Se aplica una transformación logarítmica para facilitar la visualización de la distribución, donde podemos observar que los histogramas de train y test presentan distribuciones similares.
+
+```{r}
+bind_rows(
+  df_train %>% mutate(split = "Train"),
+  df_test  %>% mutate(split = "Test")
+) %>%
+  ggplot(aes(x = price)) +
+  geom_histogram(bins = 50, fill = "steelblue", color = "white") +
+  scale_x_log10() +
+  facet_wrap(~ split, ncol = 2) +
+  labs(
+    title = "Price distribution (log scale)",
+    x = "Price (log10)",
+    y = "Count"
+  )
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+bind_rows(
+  df_train %>% mutate(split = "Train"),
+  df_test  %>% mutate(split = "Test")
+) %>%
+  ggplot(aes(x = price)) +
+  geom_histogram(
+    aes(y = after_stat(density)),
+    bins = 50,
+    fill = "steelblue",
+    color = "white",
+    alpha = 0.8
+  ) +
+  scale_x_log10() +
+  facet_wrap(~ split, ncol = 2) +
+  labs(
+    title = "Price distribution (log scale)",
+    x = "Price (log10)",
+    y = "Density"
+  )
+
+```
+
+## 5. Comparación precio vs tamaño de la vivienda
+
+El área suele ser uno de los factores más influyentes en el precio de la vivienda, donde podemos revisar que existe una relación entre ambas variables.
+
+```{r}
+df_train %>%
+  ggplot(aes(x = living_in_m2, y = price)) +
+  geom_point(alpha = 0.3) +
+  scale_x_log10() +
+  scale_y_log10() +
+  labs(
+    title = "Price vs Living Area",
+    x = "Living area (m², log10)",
+    y = "Price (log10)"
+  )
+```
+
+## 6. Variable derivada: precio por metro cuadrado
+
+Se agrega una nueva variable para normalizar el precio con respecto al tamaño de la vivienda, de modo que puedan ser comparables entre sí. Posteriormente, analizamos la distribución de esta nueva variable.
+
+```{r}
+df_train <- df_train %>%
+  mutate(price_per_m2 = price / living_in_m2)
+
+df_test <- df_test %>%
+  mutate(price_per_m2 = price / living_in_m2)
+
+```
+
+
+```{r}
+df_train %>%
+  ggplot(aes(x = price_per_m2)) +
+  geom_histogram(
+    bins = 50,
+    fill = "darkseagreen3",
+    color = "white"
+  ) +
+  scale_x_log10() +
+  labs(
+    title = "Price per m² distribution (log scale)",
+    x = "Price per m² (log10)",
+    y = "Count"
+  )
+
+```
+
+## 7. Efecto de la ubicación: zonas por cuartiles
+
+```{r}
+df_train %>%
+  ggplot(aes(
+    x = factor(quartile_zone),
+    y = price_per_m2
+  )) +
+  geom_boxplot(fill = "tan", alpha = 0.8) +
+  scale_y_log10() +
+  labs(
+    title = "Price per m² by quartile zone",
+    x = "Quartile zone",
+    y = "Price per m² (log10)"
+  )
+
+```
+
+## 8. Variables binarias: comodidades y condición
+
+```{r}
+df_train %>%
+  ggplot(aes(
+    x = nice_view,
+    y = price_per_m2
+  )) +
+  geom_boxplot(fill = "plum", alpha = 0.8) +
+  scale_y_log10() +
+  labs(
+    title = "Effect of nice view on price per m²",
+    x = "Nice view",
+    y = "Price per m² (log10)"
+  )
+
+```
