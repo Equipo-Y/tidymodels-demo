@@ -5,6 +5,16 @@ format: html
 editor: visual
 ---
 
+# Preprocesamiento con rsample y recipes
+
+En este notebook se aborda el **preprocesamiento de los datos** utilizando el ecosistema `tidymodels`. El objetivo principal es preparar el dataset de manera **reproducible, consistente y libre de fuga de información**, dejando los datos listos para la etapa de modelado que se desarrollará en los siguientes notebooks.
+
+En particular, se trabajan tres componentes clave:
+
+1.  Unificación del dataset original
+2.  Separación en conjuntos de entrenamiento y prueba con `rsample`
+3.  Definición del preprocesamiento mediante `recipes`
+
 # 0. Librerías y configuraciones
 
 ```{r}
@@ -16,6 +26,8 @@ set.seed(1812)
 ```
 
 # 1. Carga del dataset
+
+El dataset original se encuentra dividido en archivos de entrenamiento y prueba. Para este proyecto, ambos conjuntos se unifican con el fin de **redefinir la partición** de manera controlada.
 
 Fuente del dataset:\
 <https://www.kaggle.com/datasets/aravinii/house-price-prediction-treated-dataset>
@@ -30,15 +42,24 @@ skim(df)
 summary(df)
 ```
 
-## 2. Separando el dataset con rsample
+# 2. Separación del dataset con rsample
+
+Una vez unificados los datos, se procede a generar una nueva partición en conjuntos de entrenamiento y prueba.
+
+Se utiliza una división 80/20, estratificada por la variable objetivo (`price`), con el objetivo de mantener distribuciones similares de precios en ambos conjuntos.
 
 ```{r}
 # 80% entrenamiento, 20% prueba
-data_split <- initial_split(df, prop = 0.8)
+data_split <- initial_split(df, prop = 0.8, strata = price)
 
 train_data <- training(data_split)
 test_data  <- testing(data_split)
 ```
+
+A partir de este objeto se obtienen:
+
+-   `train_data`: conjunto utilizado para aprender transformaciones y entrenar modelos
+-   `test_data`: conjunto reservado exclusivamente para evaluación
 
 ```{r}
 summary(train_data)
@@ -48,7 +69,11 @@ summary(train_data)
 summary(test_data)
 ```
 
-## 3. Preprocesamiento con recipes
+# 3. Preprocesamiento con recipes
+
+El preprocesamiento se define mediante una **receta (`recipe`)**, que describe de forma declarativa todas las transformaciones que se aplicarán a los datos antes del modelado.
+
+La receta se define **únicamente sobre el conjunto de entrenamiento**, ya que cualquier parámetro aprendido (medias, desviaciones, niveles categóricos, etc.) debe provenir solo de estos datos.
 
 ```{r}
 rec <-
@@ -114,10 +139,9 @@ rec <-
 
 ```
 
-Preprocesamiento
-
 ```{r}
 rec_prep <- prep(rec)
+rec_prep
 ```
 
 ```{r}
@@ -127,3 +151,13 @@ train_data_proc <- bake(rec_prep, new_data = NULL)
 ```{r}
 train_data_proc
 ```
+
+# Nota final
+
+Separar explícitamente el **preprocesamiento (`recipes`)** del **modelado** permite:
+
+-   reutilizar el mismo pipeline en distintos modelos
+-   garantizar transformaciones consistentes entre entrenamiento y prueba
+-   evitar errores comunes de fuga de información
+
+En el siguiente notebook se utilizará esta receta dentro de `workflow()` para entrenar y comparar distintos modelos de regresión.

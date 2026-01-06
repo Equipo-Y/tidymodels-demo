@@ -1,0 +1,303 @@
+---
+title: "Tidymodels Demo Pt. 3"
+author: "Jessica Aquino, Pedro Cataño"
+format: html
+editor: visual
+---
+
+# Modelado con parsnip y workflows
+
+En este notebook se aborda la **construcción de modelos de regresión** utilizando el ecosistema `tidymodels`, a partir del preprocesamiento definido en el notebook anterior.
+
+El objetivo principal de esta etapa es:
+
+-   definir distintos algoritmos de regresión de forma consistente
+-   integrar cada modelo con el mismo esquema de preprocesamiento
+-   preparar los pipelines necesarios para su posterior ajuste y comparación
+
+El foco está en **definir correctamente los modelos y workflows**, asegurando que todos utilicen exactamente la misma receta y puedan compararse de forma justa en la siguiente etapa.
+
+Este notebook se apoya directamente en el trabajo realizado en:
+
+-   **Pt. 2: Preprocesamiento con rsample y recipes**
+
+y prepara el terreno para:
+
+-   **Pt. 4: Tuning y evaluación con resampling**
+
+[Ir a construcción de modelos](#modeling)
+
+# 0. Librerías y configuraciones
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(skimr)
+library(bonsai) # Para conectar lightgbm
+
+set.seed(1812)
+```
+
+# 1. Carga del dataset
+
+Fuente del dataset:\
+<https://www.kaggle.com/datasets/aravinii/house-price-prediction-treated-dataset>
+
+```{r}
+df <- bind_rows(read_csv("../data/df_train.csv"), read_csv("../data/df_test.csv"))
+
+skim(df)
+```
+
+```{r}
+summary(df)
+```
+
+# 2. Separando el dataset con rsample
+
+```{r}
+# 80% entrenamiento, 20% prueba
+data_split <- initial_split(df, prop = 0.8, strata = price)
+
+train_data <- training(data_split)
+test_data  <- testing(data_split)
+```
+
+```{r}
+summary(train_data)
+```
+
+```{r}
+summary(test_data)
+```
+
+# 3. Preprocesamiento con recipes
+
+A diferencia del notebook anterior, en esta etapa no se ejecuta manualmente la receta.\
+El preprocesamiento se aplica automáticamente dentro de cada workflow durante el entrenamiento y la predicción.
+
+```{r}
+rec <-
+  recipe(price ~ ., data = train_data) %>%
+  
+  # -------------------------
+  # Feature engineering
+  # -------------------------
+  step_mutate(
+    # Size & layout
+    m2_per_bedroom        = living_in_m2 / bedrooms,
+    bathrooms_per_bedroom = real_bathrooms / bedrooms,
+    
+    # Bathroom structure
+    has_multiple_bathrooms = real_bathrooms >= 2,
+    
+    # Quality aggregation
+    quality_score =
+      as.integer(has_basement) +
+      as.integer(renovated) +
+      as.integer(nice_view) +
+      as.integer(perfect_condition) +
+      as.integer(has_lavatory),
+    
+    # Temporal abstraction
+    quarter = factor(ceiling(month / 3)),
+    
+    # Ordinal → categorical
+    grade = factor(grade, ordered = TRUE),
+    quartile_zone = factor(quartile_zone)
+  ) %>%
+  
+  # -------------------------
+  # Roles
+  # -------------------------
+  update_role(date, new_role = "ID") %>%
+  
+  # -------------------------
+  # Transform continuous predictors ONLY
+  # -------------------------
+  step_log(living_in_m2, m2_per_bedroom) %>%
+  
+  step_normalize(
+    living_in_m2,
+    m2_per_bedroom,
+    bathrooms_per_bedroom,
+    quality_score
+  ) %>%
+  
+  # -------------------------
+  # Encoding
+  # -------------------------
+  step_dummy(
+    all_nominal_predictors(),
+    one_hot = TRUE
+  ) %>%
+  
+  # -------------------------
+  # Cleanup
+  # -------------------------
+  step_rm(month) %>%
+  step_zv(all_predictors())
+
+```
+
+# 4. Construcción de modelos con parsnip {#modeling}
+
+En esta sección se definen distintos **modelos de regresión** utilizando el paquete `parsnip`, que proporciona una interfaz unificada para especificar algoritmos de machine learning de forma consistente, independientemente del motor subyacente.
+
+El objetivo es **comparar distintos enfoques de modelado** sobre el mismo conjunto de datos y bajo el mismo esquema de preprocesamiento, de modo que las diferencias en desempeño se deban al modelo y no a los datos.
+
+Se consideran cuatro modelos representativos:
+
+-   un modelo lineal clásico como línea base
+-   un modelo lineal regularizado
+-   un modelo no lineal basado en árboles (Random Forest)
+-   un modelo de boosting de gradiente (LightGBM)
+
+## Motores disponibles
+
+Antes de definir los modelos, se inspeccionan los motores disponibles en `parsnip` para cada tipo de algoritmo. Esto permite verificar qué implementaciones pueden utilizarse en el entorno actual y qué motores requieren extensiones adicionales.
+
+Buscador completo: <https://www.tidymodels.org/find/parsnip/>
+
+```{r}
+show_engines("linear_reg")
+show_engines("rand_forest")
+show_engines("boost_tree")
+```
+
+## Definición de modelos
+
+A continuación se definen los distintos modelos utilizando `parsnip`.\
+En esta etapa solo se especifican los algoritmos y sus hiperparámetros, sin entrenarlos todavía.
+
+### 1. Regresión lineal
+
+La regresión lineal se utiliza como **modelo base** (*baseline*). Su función principal no es maximizar el desempeño, sino:
+
+-   validar que el preprocesamiento funciona correctamente
+-   establecer una referencia mínima de desempeño
+-   mantener interpretabilidad sobre los efectos de las variables
+
+Este modelo no requiere ajuste de hiperparámetros.
+
+```{r}
+model_lm <- linear_reg() %>%
+  set_engine("lm")
+```
+
+### 2. Regresión regularizada
+
+El modelo regularizado implementado con `glmnet` permite controlar:
+
+-   la complejidad del modelo
+-   la colinealidad entre predictores
+-   la selección automática de variables
+
+Mediante los hiperparámetros `penalty` y `mixture`, es posible explorar modelos tipo Ridge, Lasso o Elastic Net. Este modelo será ajustado posteriormente mediante técnicas de *tuning*.
+
+```{r}
+model_glmnet <- linear_reg(
+  penalty = tune(),
+  mixture = tune()
+) %>%
+  set_engine("glmnet")
+
+```
+
+### 3. Random forest
+
+Random Forest es un modelo no lineal basado en ensambles de árboles de decisión. Resulta especialmente útil para capturar:
+
+-   interacciones entre variables
+-   relaciones no lineales
+-   efectos complejos difíciles de modelar con regresión lineal
+
+Se define con hiperparámetros que controlan la profundidad y diversidad de los árboles, los cuales serán optimizados en una etapa posterior.
+
+```{r}
+model_rf <- rand_forest(
+  mtry = tune(),
+  min_n = tune(),
+  trees = 1000
+) %>%
+  set_engine("ranger") %>%
+  set_mode("regression")
+
+```
+
+### 4. LightGBM (Gradient Boosting)
+
+LightGBM es un modelo de *gradient boosting* diseñado para ser eficiente y preciso en datos tabulares. Este tipo de modelo suele obtener alto desempeño en problemas de predicción de precios, aunque a costa de menor interpretabilidad.
+
+Dado que LightGBM no forma parte del núcleo de `tidymodels`, requiere la instalación de extensiones adicionales. En este notebook se incluye como un modelo avanzado para comparación.
+
+```{r}
+model_lgbm <- boost_tree(
+  trees = tune(),
+  tree_depth = tune(),
+  learn_rate = tune(),
+  mtry = tune(),
+  min_n = tune()
+) %>%
+  set_engine("lightgbm") %>%
+  set_mode("regression")
+
+```
+
+# 5. Workflows
+
+Una vez definidos los modelos, se integran dentro de **workflows**. Un `workflow` combina explícitamente:
+
+-   el preprocesamiento definido con `recipes`
+-   la especificación del modelo definida con `parsnip`
+
+Esta separación permite:
+
+-   reutilizar el mismo preprocesamiento en distintos modelos
+-   garantizar comparaciones justas entre algoritmos
+-   evitar errores de fuga de información
+
+Cada modelo cuenta con su propio `workflow`, pero todos comparten la misma receta.
+
+## Workflow - Regresión lineal
+
+Este workflow se ajusta directamente sobre los datos de entrenamiento y se utiliza como referencia inicial de desempeño.
+
+```{r}
+wf_lm <- workflow() %>%
+  add_recipe(rec) %>%
+  add_model(model_lm)
+```
+
+```{r}
+fit_lm <- fit(wf_lm, data = train_data)
+```
+
+## Workflow - glmnet, Random Forest y LightGBM
+
+En estos casos, los workflows se definen pero **no se entrenan todavía**, ya que sus hiperparámetros serán optimizados en la siguiente etapa mediante técnicas de *resampling* y *tuning*.
+
+```{r}
+wf_glmnet <- workflow() %>%
+  add_recipe(rec) %>%
+  add_model(model_glmnet)
+```
+
+```{r}
+wf_rf <- workflow() %>%
+  add_recipe(rec) %>%
+  add_model(model_rf)
+```
+
+```{r}
+wf_lgbm <- workflow() %>%
+  add_recipe(rec) %>%
+  add_model(model_lgbm)
+```
+
+# Nota final
+
+En este notebook se definieron y estructuraron distintos modelos de regresión utilizando `parsnip` y `workflow()`.\
+Todos los modelos comparten el mismo esquema de preprocesamiento, lo que permite compararlos bajo condiciones justas.
+
+En el siguiente notebook se abordará el **ajuste de hiperparámetros y la evaluación mediante resampling**, utilizando estos workflows como punto de partida.
