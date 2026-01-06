@@ -25,7 +25,7 @@ y prepara el terreno para:
 
 -   **Pt. 4: Tuning y evaluación con resampling**
 
-[Ir a construcción de modelos](#modeling)
+[Ir a construcción de modelos](#modeling) [Ir a creación de flujos](#workflows)
 
 # 0. Librerías y configuraciones
 
@@ -106,6 +106,15 @@ rec <-
     grade = factor(grade, ordered = TRUE),
     quartile_zone = factor(quartile_zone)
   ) %>%
+  
+  # -------------------------
+  # From logical to numeric (for regularized regression)
+  # -------------------------
+  step_mutate_at(
+    all_logical_predictors(),
+    fn = as.numeric
+  ) %>% 
+
   
   # -------------------------
   # Roles
@@ -244,7 +253,7 @@ model_lgbm <- boost_tree(
 
 ```
 
-# 5. Workflows
+# 5. Workflows {#workflows}
 
 Una vez definidos los modelos, se integran dentro de **workflows**. Un `workflow` combina explícitamente:
 

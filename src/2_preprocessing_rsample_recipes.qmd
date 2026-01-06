@@ -107,6 +107,15 @@ rec <-
   ) %>%
   
   # -------------------------
+  # From logical to numeric (for regularized regression)
+  # -------------------------
+  step_mutate_at(
+    all_logical_predictors(),
+    fn = as.numeric
+  ) %>% 
+
+  
+  # -------------------------
   # Roles
   # -------------------------
   update_role(date, new_role = "ID") %>%

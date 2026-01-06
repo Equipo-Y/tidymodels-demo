@@ -5,28 +5,28 @@ format: html
 editor: visual
 ---
 
-# 1. Presentación del dataset
+# Análisis exploratorio de datos
 
 Este documento se centra en el análisis exploratorio del conjunto de datos utilizado para la predicción de precios de viviendas.
 
 Fuente del dataset:\
 <https://www.kaggle.com/datasets/aravinii/house-price-prediction-treated-dataset>
 
-## 1. Instalación de paquetes
+# 0. Instalación de paquetes
 
 ```{r}
 library(tidyverse)
 library(skimr)
 ```
 
-## 2. Carga de datos
+# 1. Carga de datos
 
 ```{r}
 df_train <- read_csv("../data/df_train.csv")
 df_test  <- read_csv("../data/df_test.csv")
 ```
 
-## 3. Vistazo general del dataset
+# 2. Vistazo general del dataset
 
 Se inspecciona que el dataset fue previamente procesado, ya que no presenta datos faltantes en las variables numéricas, binarias o la fecha.
 
@@ -37,7 +37,7 @@ skim(bind_rows(
 ))
 ```
 
-## 4. Variable objetivo: distribución del precio
+# 3. Variable objetivo: distribución del precio
 
 Se aplica una transformación logarítmica para facilitar la visualización de la distribución, donde podemos observar que los histogramas de train y test presentan distribuciones similares.
 
@@ -83,7 +83,7 @@ bind_rows(
 
 ```
 
-## 5. Comparación precio vs tamaño de la vivienda
+## 4. Comparación precio vs tamaño de la vivienda
 
 El área suele ser uno de los factores más influyentes en el precio de la vivienda, donde podemos revisar que existe una relación entre ambas variables.
 
@@ -100,7 +100,7 @@ df_train %>%
   )
 ```
 
-## 6. Variable derivada: precio por metro cuadrado
+## 5. Variable derivada: precio por metro cuadrado
 
 Se agrega una nueva variable para normalizar el precio con respecto al tamaño de la vivienda, de modo que puedan ser comparables entre sí. Posteriormente, analizamos la distribución de esta nueva variable.
 
@@ -130,7 +130,7 @@ df_train %>%
 
 ```
 
-## 7. Efecto de la ubicación: zonas por cuartiles
+## 6. Efecto de la ubicación: zonas por cuartiles
 
 ```{r}
 df_train %>%
@@ -148,7 +148,7 @@ df_train %>%
 
 ```
 
-## 8. Variables binarias: comodidades y condición
+## 7. Variables binarias: comodidades y condición
 
 ```{r}
 df_train %>%
