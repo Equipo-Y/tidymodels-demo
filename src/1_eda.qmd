@@ -1,5 +1,5 @@
 ---
-title: "Tidymodels Demo"
+title: "Tidymodels Demo Pt. 1"
 author: "Jessica Aquino, Pedro Cataño"
 format: html
 editor: visual
@@ -9,25 +9,21 @@ editor: visual
 
 Este documento se centra en el análisis exploratorio del conjunto de datos utilizado para la predicción de precios de viviendas.
 
-El objetivo de este EDA es comprender la distribución de la variable objetivo y contextualizar las
-
 Fuente del dataset:\
-https://www.kaggle.com/datasets/aravinii/house-price-prediction-treated-dataset
+<https://www.kaggle.com/datasets/aravinii/house-price-prediction-treated-dataset>
 
 ## 1. Instalación de paquetes
 
 ```{r}
 library(tidyverse)
-library(janitor)
 library(skimr)
 ```
 
-
-## 2. Load data
+## 2. Carga de datos
 
 ```{r}
-df_train <- read_csv("data/df_train.csv")
-df_test  <- read_csv("data/df_test.csv")
+df_train <- read_csv("../data/df_train.csv")
+df_test  <- read_csv("../data/df_test.csv")
 ```
 
 ## 3. Vistazo general del dataset
@@ -116,7 +112,6 @@ df_test <- df_test %>%
   mutate(price_per_m2 = price / living_in_m2)
 
 ```
-
 
 ```{r}
 df_train %>%

@@ -1,0 +1,129 @@
+---
+title: "Tidymodels Demo Pt. 2"
+author: "Jessica Aquino, Pedro Cataño"
+format: html
+editor: visual
+---
+
+# 0. Librerías y configuraciones
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(skimr)
+
+set.seed(1812)
+```
+
+# 1. Carga del dataset
+
+Fuente del dataset:\
+<https://www.kaggle.com/datasets/aravinii/house-price-prediction-treated-dataset>
+
+```{r}
+df <- bind_rows(read_csv("../data/df_train.csv"), read_csv("../data/df_test.csv"))
+
+skim(df)
+```
+
+```{r}
+summary(df)
+```
+
+## 2. Separando el dataset con rsample
+
+```{r}
+# 80% entrenamiento, 20% prueba
+data_split <- initial_split(df, prop = 0.8)
+
+train_data <- training(data_split)
+test_data  <- testing(data_split)
+```
+
+```{r}
+summary(train_data)
+```
+
+```{r}
+summary(test_data)
+```
+
+## 3. Preprocesamiento con recipes
+
+```{r}
+rec <-
+  recipe(price ~ ., data = train_data) %>%
+  
+  # -------------------------
+  # Feature engineering
+  # -------------------------
+  step_mutate(
+    # Size & layout
+    m2_per_bedroom        = living_in_m2 / bedrooms,
+    bathrooms_per_bedroom = real_bathrooms / bedrooms,
+    
+    # Bathroom structure
+    has_multiple_bathrooms = real_bathrooms >= 2,
+    
+    # Quality aggregation
+    quality_score =
+      as.integer(has_basement) +
+      as.integer(renovated) +
+      as.integer(nice_view) +
+      as.integer(perfect_condition) +
+      as.integer(has_lavatory),
+    
+    # Temporal abstraction
+    quarter = factor(ceiling(month / 3)),
+    
+    # Ordinal → categorical
+    grade = factor(grade, ordered = TRUE),
+    quartile_zone = factor(quartile_zone)
+  ) %>%
+  
+  # -------------------------
+  # Roles
+  # -------------------------
+  update_role(date, new_role = "ID") %>%
+  
+  # -------------------------
+  # Transform continuous predictors ONLY
+  # -------------------------
+  step_log(living_in_m2, m2_per_bedroom) %>%
+  
+  step_normalize(
+    living_in_m2,
+    m2_per_bedroom,
+    bathrooms_per_bedroom,
+    quality_score
+  ) %>%
+  
+  # -------------------------
+  # Encoding
+  # -------------------------
+  step_dummy(
+    all_nominal_predictors(),
+    one_hot = TRUE
+  ) %>%
+  
+  # -------------------------
+  # Cleanup
+  # -------------------------
+  step_rm(month) %>%
+  step_zv(all_predictors())
+
+```
+
+Preprocesamiento
+
+```{r}
+rec_prep <- prep(rec)
+```
+
+```{r}
+train_data_proc <- bake(rec_prep, new_data = NULL)
+```
+
+```{r}
+train_data_proc
+```
