@@ -286,3 +286,4 @@ En este notebook se definieron y estructuraron distintos modelos de regresión u
 Todos los modelos comparten el mismo esquema de preprocesamiento, lo que permite compararlos bajo condiciones justas.
 
 En el siguiente notebook se abordará el **ajuste de hiperparámetros y la evaluación mediante resampling**, utilizando estos workflows como punto de partida.
+

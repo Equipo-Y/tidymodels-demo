@@ -1,11 +1,7 @@
 ---
 title: "Tidymodels Demo Pt. 2"
 author: "Jessica Aquino, Pedro Cataño"
-format:
-  html:
-    toc: true
-    toc-depth: 3
-    toc-location: left
+format: html
 editor: visual
 ---
 
@@ -174,3 +170,4 @@ Separar explícitamente el **preprocesamiento (`recipes`)** del **modelado** per
 -   evitar errores comunes de fuga de información
 
 En el siguiente notebook se utilizará esta receta dentro de `workflow()` para entrenar y comparar distintos modelos de regresión.
+

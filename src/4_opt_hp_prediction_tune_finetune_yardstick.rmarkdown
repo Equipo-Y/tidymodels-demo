@@ -1,7 +1,11 @@
 ---
 title: "Tidymodels Demo Pt. 4"
 author: "Jessica Aquino, Pedro Cataño"
-format: html
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
 editor: visual
 ---
 
@@ -129,18 +133,16 @@ rec <-
 
 ```
 
-# 4. Construcción de modelos con parsnip {#modeling}
+# 4. Definición de modelos con parsnip {#modeling}
 
-## Definición de modelos
-
-### 1. Regresión lineal
+## 1. Regresión lineal
 
 ```{r}
 model_lm <- linear_reg() %>%
   set_engine("lm")
 ```
 
-### 2. Regresión regularizada
+## 2. Regresión regularizada
 
 ```{r}
 model_glmnet <- linear_reg(
@@ -151,20 +153,7 @@ model_glmnet <- linear_reg(
 
 ```
 
-<!-- ### 3. Random forest -->
-
-<!-- ```{r} -->
-<!-- model_rf <- rand_forest( -->
-<!--   mtry = tune(), -->
-<!--   min_n = tune(), -->
-<!--   trees = 1000 -->
-<!-- ) %>% -->
-<!--   set_engine("ranger") %>% -->
-<!--   set_mode("regression") -->
-
-<!-- ``` -->
-
-### 4. LightGBM (Gradient Boosting)
+## 3. LightGBM (Gradient Boosting)
 
 ```{r}
 model_lgbm <- boost_tree(
@@ -189,33 +178,23 @@ wf_lm <- workflow() %>%
   add_model(model_lm)
 ```
 
-```{r}
-fit_lm <- fit(wf_lm, data = train_data)
-```
-
-## Workflow - glmnet, Random Forest y LightGBM
+## Workflow - glmnet y LightGBM
 
 ```{r}
 wf_glmnet <- workflow() %>%
   add_recipe(rec) %>%
   add_model(model_glmnet)
-```
 
-<!-- ```{r} -->
-<!-- wf_rf <- workflow() %>% -->
-<!--   add_recipe(rec) %>% -->
-<!--   add_model(model_rf) -->
-<!-- ``` -->
-
-```{r}
 wf_lgbm <- workflow() %>%
   add_recipe(rec) %>%
   add_model(model_lgbm)
 ```
 
-# 6. Tuning
+# 6. Tuning de modelos con resampling {#tuning}
 
-## Resampling: validación cruzada
+En esta sección se ajustan los hiperparámetros de los modelos mediante validación cruzada, utilizando un esquema común de resampling y métricas de evaluación.
+
+## Resampling: validación cruzada con rsample
 
 Se utiliza validación cruzada con 5 folds, estratificada por la variable objetivo (`price`), para obtener estimaciones más estables del desempeño de los modelos.
 
@@ -229,7 +208,9 @@ cv_folds <- vfold_cv(
 )
 ```
 
-## Métricas de evaluación
+## Definición y uso de métricas con yardstick
+
+Las métricas de evaluación (rmse, rsq, mae) provienen del paquete `yardstick`, que forma parte del ecosistema tidymodels y se utiliza tanto durante el tuning como en la evaluación final.
 
 ```{r}
 reg_metrics <- metric_set(
@@ -240,9 +221,9 @@ reg_metrics <- metric_set(
 ```
 
 
-## Tuning – Regresión regularizada (glmnet) 
+## Tuning del modelo de Regresión regularizada (glmnet) 
 
-### Grid de hiperparámetros
+### Espacio de hiperparámetros
 
 ```{r}
 glmnet_grid <- grid_regular(
@@ -252,7 +233,7 @@ glmnet_grid <- grid_regular(
 )
 ```
 
-### Tuning
+### Ajuste por validación cruzada
 
 ```{r}
 tuned_glmnet <- tune_grid(
@@ -263,41 +244,16 @@ tuned_glmnet <- tune_grid(
 )
 ```
 
+### Resultados del tuning
+
 ```{r}
 collect_metrics(tuned_glmnet)
 ```
 
-<!-- ## Tuning – Random Forest -->
+## Tuning del modelo LightGBM
+Dado el costo computacional del modelo, se utiliza una optimización bayesiana para explorar el espacio de hiperparámetros de forma más eficiente.
 
-<!-- ### Grid de hiperparámetros -->
-
-<!-- ```{r} -->
-<!-- rf_grid <- grid_regular( -->
-<!--   mtry(range = c(5, 30)), -->
-<!--   min_n(), -->
-<!--   levels = 5 -->
-<!-- ) -->
-<!-- ``` -->
-
-<!-- ### Tuning -->
-
-<!-- ```{r} -->
-<!-- tuned_rf <- tune_grid( -->
-<!--   wf_rf, -->
-<!--   resamples = cv_folds, -->
-<!--   grid = rf_grid, -->
-<!--   metrics = reg_metrics -->
-<!-- ) -->
-<!-- ``` -->
-
-<!-- ```{r} -->
-<!-- collect_metrics(tuned_rf) -->
-<!-- ``` -->
-
-
-## Tuning – LightGBM
-
-### Grid de hiperparámetros
+### Definición del espacio de búsqueda de hiperparámetros
 
 ```{r}
 lgbm_params <- parameters(
@@ -321,73 +277,81 @@ lgbm_grid <- grid_regular(
 
 ```
 
-### Tuning
+### Optimización bayesiana con finetune
+
+Para este modelo, utilizaremos una optimización bayesiana con la librería de tidymodels `finetune`.
 
 ```{r}
-tuned_lgbm <- tune_grid(
+library(finetune)
+
+tuned_lgbm <- tune_bayes(
   wf_lgbm,
   resamples = cv_folds,
-  grid = lgbm_grid,
-  metrics = reg_metrics
+  param_info = lgbm_params,
+  metrics = reg_metrics,
+  iter = 20
 )
+
+
 ```
+
+### Resultados del tuning
 
 ```{r}
 collect_metrics(tuned_lgbm)
 ```
 
-## 7. Selección del mejor modelo por métrica
+## Selección de hiperparámetros óptimos
 
 ```{r}
 best_glmnet <- select_best(tuned_glmnet, metric = "rmse")
-# best_rf     <- select_best(tuned_rf, metric = "rmse")
 best_lgbm   <- select_best(tuned_lgbm, metric = "rmse")
 
 best_glmnet
-# best_rf
 best_lgbm
 ```
 
 
-## 7. Finalización de workflows
+# 7. Entrenamiento final de los modelos seleccionados
+
+Con `finalize_workflow()` reemplazamos los nejores hiperparámetros obtenidos en la optimización.
 
 ```{r}
 final_glmnet <- finalize_workflow(wf_glmnet, best_glmnet)
-# final_rf     <- finalize_workflow(wf_rf, best_rf)
 final_lgbm   <- finalize_workflow(wf_lgbm, best_lgbm)
 ```
 
-## 8. Evaluación final sobre el conjunto de prueba
+Entrenamos el modelo final.
 
 ```{r}
+fit_lm <- fit(wf_lm, data = train_data)
 fit_glmnet <- fit(final_glmnet, data = train_data)
-# fit_rf     <- fit(final_rf, data = train_data)
 fit_lgbm   <- fit(final_lgbm, data = train_data)
 ```
 
-### Predicciones
+# 8. Predicción de los modelos
 
 ```{r}
+pred_lm <- predict(fit_lm, test_data) %>%
+  bind_cols(test_data %>% select(price)) %>%
+  mutate(model = "lm")
+
 pred_glmnet <- predict(fit_glmnet, test_data) %>%
   bind_cols(test_data %>% select(price)) %>%
   mutate(model = "glmnet")
-
-# pred_rf <- predict(fit_rf, test_data) %>%
-#   bind_cols(test_data %>% select(price)) %>%
-#   mutate(model = "random_forest")
 
 pred_lgbm <- predict(fit_lgbm, test_data) %>%
   bind_cols(test_data %>% select(price)) %>%
   mutate(model = "lightgbm")
 ```
 
-## 9. Comparación de métricas
+# 9. Comparación de métricas
 
 ```{r}
 all_preds <- bind_rows(
   pred_glmnet,
-  # pred_rf,
-  pred_lgbm
+  pred_lgbm,
+  pred_lm
 )
 
 all_preds %>%
@@ -395,7 +359,7 @@ all_preds %>%
   metrics(truth = price, estimate = .pred)
 ```
 
-## 10. Visualización de desempeño
+# 10. Visualización de desempeño
 
 ```{r}
 all_preds %>%
@@ -411,8 +375,51 @@ all_preds %>%
   )
 ```
 
+```{r}
+all_preds %>%
+  mutate(residual = price - .pred) %>%
+  ggplot(aes(x = price, y = residual, color = model)) +
+  geom_point(alpha = 0.4) +
+  scale_x_log10() +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(
+    title = "Residuos vs precio real",
+    x = "Precio real (log)",
+    y = "Residuo"
+  )
 
-## Nota final
+```
+```{r}
+all_preds %>%
+  mutate(residual = price - .pred) %>%
+  ggplot(aes(x = residual, fill = model)) +
+  geom_density(alpha = 0.5) +
+  labs(
+    title = "Distribución de residuos",
+    x = "Residuo",
+    y = "Densidad"
+  )
+
+```
+
+```{r}
+all_preds %>%
+  mutate(
+    abs_error = abs(price - .pred),
+    price_bin = ntile(price, 4)
+  ) %>%
+  ggplot(aes(x = factor(price_bin), y = abs_error, fill = model)) +
+  geom_boxplot() +
+  scale_y_log10() +
+  labs(
+    title = "Error absoluto por cuartil de precio",
+    x = "Cuartil de precio",
+    y = "Error absoluto (log)"
+  )
+
+```
+
+# Nota final
 
 En este notebook se realizó el ajuste de hiperparámetros y la evaluación comparativa de distintos modelos de regresión bajo un esquema de resampling común.
 
@@ -422,3 +429,4 @@ En un escenario productivo, el siguiente paso podría incluir:
 - análisis de importancia de variables
 - evaluación de errores por segmento
 - validación externa o temporal
+

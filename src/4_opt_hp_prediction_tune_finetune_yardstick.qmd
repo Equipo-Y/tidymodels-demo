@@ -1,0 +1,431 @@
+---
+title: "Tidymodels Demo Pt. 4"
+author: "Jessica Aquino, Pedro Cataño"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+editor: visual
+---
+
+# Tuning y evaluación con resampling
+
+En este notebook se realiza el **ajuste de hiperparámetros (*tuning*)** y la **evaluación comparativa** de los modelos definidos en el notebook anterior.
+
+El objetivo principal de esta etapa es:
+
+- optimizar los hiperparámetros de cada modelo
+- evaluar su desempeño de forma robusta mediante resampling
+- comparar métricas bajo un esquema común y reproducible
+
+Todos los modelos utilizan exactamente el mismo:
+- conjunto de entrenamiento
+- esquema de preprocesamiento (`recipe`)
+- métrica de evaluación
+
+De esta manera, las diferencias observadas en desempeño pueden atribuirse al modelo y no al pipeline de datos.
+
+[Ir a tuning](#tuning)
+
+# 0. Librerías y configuraciones
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(skimr)
+library(bonsai) # Para conectar lightgbm
+
+set.seed(1812)
+```
+
+# 1. Carga del dataset
+
+Fuente del dataset:\
+<https://www.kaggle.com/datasets/aravinii/house-price-prediction-treated-dataset>
+
+```{r}
+df <- bind_rows(read_csv("../data/df_train.csv"), read_csv("../data/df_test.csv"))
+```
+
+# 2. Separando el dataset con rsample
+
+```{r}
+# 80% entrenamiento, 20% prueba
+data_split <- initial_split(df, prop = 0.8, strata = price)
+
+train_data <- training(data_split)
+test_data  <- testing(data_split)
+```
+
+# 3. Preprocesamiento con recipes
+
+```{r}
+rec <-
+  recipe(price ~ ., data = train_data) %>%
+  
+  # -------------------------
+  # Feature engineering
+  # -------------------------
+  step_mutate(
+    # Size & layout
+    m2_per_bedroom        = living_in_m2 / bedrooms,
+    bathrooms_per_bedroom = real_bathrooms / bedrooms,
+    
+    # Bathroom structure
+    has_multiple_bathrooms = real_bathrooms >= 2,
+    
+    # Quality aggregation
+    quality_score =
+      as.integer(has_basement) +
+      as.integer(renovated) +
+      as.integer(nice_view) +
+      as.integer(perfect_condition) +
+      as.integer(has_lavatory),
+    
+    # Temporal abstraction
+    quarter = factor(ceiling(month / 3)),
+    
+    # Ordinal → categorical
+    grade = factor(grade, ordered = TRUE),
+    quartile_zone = factor(quartile_zone)
+  ) %>%
+  
+  # -------------------------
+  # From logical to numeric (for regularized regression)
+  # -------------------------
+  step_mutate_at(
+    all_logical_predictors(),
+    fn = as.numeric
+  ) %>% 
+
+  
+  # -------------------------
+  # Roles
+  # -------------------------
+  update_role(date, new_role = "ID") %>%
+  
+  # -------------------------
+  # Transform continuous predictors ONLY
+  # -------------------------
+  step_log(living_in_m2, m2_per_bedroom) %>%
+  
+  step_normalize(
+    living_in_m2,
+    m2_per_bedroom,
+    bathrooms_per_bedroom,
+    quality_score
+  ) %>%
+  
+  # -------------------------
+  # Encoding
+  # -------------------------
+  step_dummy(
+    all_nominal_predictors(),
+    one_hot = TRUE
+  ) %>%
+  
+  # -------------------------
+  # Cleanup
+  # -------------------------
+  step_rm(month) %>%
+  step_zv(all_predictors())
+
+```
+
+# 4. Definición de modelos con parsnip {#modeling}
+
+## 1. Regresión lineal
+
+```{r}
+model_lm <- linear_reg() %>%
+  set_engine("lm")
+```
+
+## 2. Regresión regularizada
+
+```{r}
+model_glmnet <- linear_reg(
+  penalty = tune(),
+  mixture = tune()
+) %>%
+  set_engine("glmnet")
+
+```
+
+## 3. LightGBM (Gradient Boosting)
+
+```{r}
+model_lgbm <- boost_tree(
+  trees = tune(),
+  tree_depth = tune(),
+  learn_rate = tune(),
+  mtry = tune(),
+  min_n = tune()
+) %>%
+  set_engine("lightgbm") %>%
+  set_mode("regression")
+
+```
+
+# 5. Workflows
+
+## Workflow - Regresión lineal
+
+```{r}
+wf_lm <- workflow() %>%
+  add_recipe(rec) %>%
+  add_model(model_lm)
+```
+
+## Workflow - glmnet y LightGBM
+
+```{r}
+wf_glmnet <- workflow() %>%
+  add_recipe(rec) %>%
+  add_model(model_glmnet)
+
+wf_lgbm <- workflow() %>%
+  add_recipe(rec) %>%
+  add_model(model_lgbm)
+```
+
+# 6. Tuning de modelos con resampling {#tuning}
+
+En esta sección se ajustan los hiperparámetros de los modelos mediante validación cruzada, utilizando un esquema común de resampling y métricas de evaluación.
+
+## Resampling: validación cruzada con rsample
+
+Se utiliza validación cruzada con 5 folds, estratificada por la variable objetivo (`price`), para obtener estimaciones más estables del desempeño de los modelos.
+
+```{r}
+set.seed(1812)
+
+cv_folds <- vfold_cv(
+  train_data,
+  v = 5,
+  strata = price
+)
+```
+
+## Definición y uso de métricas con yardstick
+
+Las métricas de evaluación (rmse, rsq, mae) provienen del paquete `yardstick`, que forma parte del ecosistema tidymodels y se utiliza tanto durante el tuning como en la evaluación final.
+
+```{r}
+reg_metrics <- metric_set(
+  rmse,
+  rsq,
+  mae
+)
+```
+
+
+## Tuning del modelo de Regresión regularizada (glmnet) 
+
+### Espacio de hiperparámetros
+
+```{r}
+glmnet_grid <- grid_regular(
+  penalty(range = c(-4, 0)),
+  mixture(),
+  levels = 5
+)
+```
+
+### Ajuste por validación cruzada
+
+```{r}
+tuned_glmnet <- tune_grid(
+  wf_glmnet,
+  resamples = cv_folds,
+  grid = glmnet_grid,
+  metrics = reg_metrics
+)
+```
+
+### Resultados del tuning
+
+```{r}
+collect_metrics(tuned_glmnet)
+```
+
+## Tuning del modelo LightGBM
+Dado el costo computacional del modelo, se utiliza una optimización bayesiana para explorar el espacio de hiperparámetros de forma más eficiente.
+
+### Definición del espacio de búsqueda de hiperparámetros
+
+```{r}
+lgbm_params <- parameters(
+  trees(),
+  tree_depth(),
+  learn_rate(range = c(-3, -1)),
+  mtry(),
+  min_n()
+)
+
+lgbm_params <- finalize(
+  lgbm_params,
+  train_data
+)
+
+
+lgbm_grid <- grid_regular(
+  lgbm_params,
+  levels = 3
+)
+
+```
+
+### Optimización bayesiana con finetune
+
+Para este modelo, utilizaremos una optimización bayesiana con la librería de tidymodels `finetune`.
+
+```{r}
+library(finetune)
+
+tuned_lgbm <- tune_bayes(
+  wf_lgbm,
+  resamples = cv_folds,
+  param_info = lgbm_params,
+  metrics = reg_metrics,
+  iter = 20
+)
+
+
+```
+
+### Resultados del tuning
+
+```{r}
+collect_metrics(tuned_lgbm)
+```
+
+## Selección de hiperparámetros óptimos
+
+```{r}
+best_glmnet <- select_best(tuned_glmnet, metric = "rmse")
+best_lgbm   <- select_best(tuned_lgbm, metric = "rmse")
+
+best_glmnet
+best_lgbm
+```
+
+
+# 7. Entrenamiento final de los modelos seleccionados
+
+Con `finalize_workflow()` reemplazamos los nejores hiperparámetros obtenidos en la optimización.
+
+```{r}
+final_glmnet <- finalize_workflow(wf_glmnet, best_glmnet)
+final_lgbm   <- finalize_workflow(wf_lgbm, best_lgbm)
+```
+
+Entrenamos el modelo final.
+
+```{r}
+fit_lm <- fit(wf_lm, data = train_data)
+fit_glmnet <- fit(final_glmnet, data = train_data)
+fit_lgbm   <- fit(final_lgbm, data = train_data)
+```
+
+# 8. Predicción de los modelos
+
+```{r}
+pred_lm <- predict(fit_lm, test_data) %>%
+  bind_cols(test_data %>% select(price)) %>%
+  mutate(model = "lm")
+
+pred_glmnet <- predict(fit_glmnet, test_data) %>%
+  bind_cols(test_data %>% select(price)) %>%
+  mutate(model = "glmnet")
+
+pred_lgbm <- predict(fit_lgbm, test_data) %>%
+  bind_cols(test_data %>% select(price)) %>%
+  mutate(model = "lightgbm")
+```
+
+# 9. Comparación de métricas
+
+```{r}
+all_preds <- bind_rows(
+  pred_glmnet,
+  pred_lgbm,
+  pred_lm
+)
+
+all_preds %>%
+  group_by(model) %>%
+  metrics(truth = price, estimate = .pred)
+```
+
+# 10. Visualización de desempeño
+
+```{r}
+all_preds %>%
+  ggplot(aes(x = price, y = .pred, color = model)) +
+  geom_point(alpha = 0.4) +
+  geom_abline(linetype = "dashed") +
+  scale_x_log10() +
+  scale_y_log10() +
+  labs(
+    title = "Predicción vs valor real",
+    x = "Precio real (log)",
+    y = "Precio predicho (log)"
+  )
+```
+
+```{r}
+all_preds %>%
+  mutate(residual = price - .pred) %>%
+  ggplot(aes(x = price, y = residual, color = model)) +
+  geom_point(alpha = 0.4) +
+  scale_x_log10() +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(
+    title = "Residuos vs precio real",
+    x = "Precio real (log)",
+    y = "Residuo"
+  )
+
+```
+```{r}
+all_preds %>%
+  mutate(residual = price - .pred) %>%
+  ggplot(aes(x = residual, fill = model)) +
+  geom_density(alpha = 0.5) +
+  labs(
+    title = "Distribución de residuos",
+    x = "Residuo",
+    y = "Densidad"
+  )
+
+```
+
+```{r}
+all_preds %>%
+  mutate(
+    abs_error = abs(price - .pred),
+    price_bin = ntile(price, 4)
+  ) %>%
+  ggplot(aes(x = factor(price_bin), y = abs_error, fill = model)) +
+  geom_boxplot() +
+  scale_y_log10() +
+  labs(
+    title = "Error absoluto por cuartil de precio",
+    x = "Cuartil de precio",
+    y = "Error absoluto (log)"
+  )
+
+```
+
+# Nota final
+
+En este notebook se realizó el ajuste de hiperparámetros y la evaluación comparativa de distintos modelos de regresión bajo un esquema de resampling común.
+
+El uso de `workflows`, `tune` y `rsample` permite construir pipelines reproducibles, comparables y extensibles, facilitando la selección del modelo más adecuado para el problema.
+
+En un escenario productivo, el siguiente paso podría incluir:
+- análisis de importancia de variables
+- evaluación de errores por segmento
+- validación externa o temporal

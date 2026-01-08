@@ -1,7 +1,11 @@
 ---
 title: "Tidymodels Demo Pt. 1"
 author: "Jessica Aquino, Pedro Cataño"
-format: html
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
 editor: visual
 ---
 
@@ -83,7 +87,7 @@ bind_rows(
 
 ```
 
-## 4. Comparación precio vs tamaño de la vivienda
+# 4. Comparación precio vs tamaño de la vivienda
 
 El área suele ser uno de los factores más influyentes en el precio de la vivienda, donde podemos revisar que existe una relación entre ambas variables.
 
@@ -100,7 +104,7 @@ df_train %>%
   )
 ```
 
-## 5. Variable derivada: precio por metro cuadrado
+# 5. Variable derivada: precio por metro cuadrado
 
 Se agrega una nueva variable para normalizar el precio con respecto al tamaño de la vivienda, de modo que puedan ser comparables entre sí. Posteriormente, analizamos la distribución de esta nueva variable.
 
@@ -130,7 +134,7 @@ df_train %>%
 
 ```
 
-## 6. Efecto de la ubicación: zonas por cuartiles
+# 6. Efecto de la ubicación: zonas por cuartiles
 
 ```{r}
 df_train %>%
@@ -148,7 +152,7 @@ df_train %>%
 
 ```
 
-## 7. Variables binarias: comodidades y condición
+# 7. Variables binarias: comodidades y condición
 
 ```{r}
 df_train %>%
